@@ -130,6 +130,9 @@ function explode(){
 let lastGesture=-1
 let lastPalm=0
 let lastX=0
+let stableGesture = -1
+let stableCount = 0
+const STABLE_FRAMES = 4   // 连续 4 帧才算真的手势
 
 const hands = new Hands({
   locateFile:f=>`https://unpkg.com/@mediapipe/hands/${f}`
@@ -141,49 +144,79 @@ hands.setOptions({
   minTrackingConfidence:0.7
 })
 
-hands.onResults(res=>{
-  if(!res.multiHandLandmarks) return
-  const lm=res.multiHandLandmarks[0]
+hands.onResults(res => {
+  if (!res.multiHandLandmarks || res.multiHandLandmarks.length === 0) {
+    lastGesture = -1
+    stableGesture = -1
+    stableCount = 0
+    lastX = 0
+    return
+  }
 
-  const palm = Math.abs(lm[0].x-lm[9].x)
-  particles.scale.setScalar(THREE.MathUtils.lerp(0.8,1.6,palm*3))
+  const lm = res.multiHandLandmarks[0]
 
-  const speed=Math.abs(lm[0].x-lastX)
-  lastX=lm[0].x
-  if(speed>0.03){
-    for(let i=0;i<COUNT;i++){
-      vel[i*3]+=(Math.random()-0.5)*speed*5
-      vel[i*3+1]+=(Math.random()-0.5)*speed*5
+  const palm = Math.abs(lm[0].x - lm[9].x)
+  particles.scale.setScalar(
+    THREE.MathUtils.lerp(0.8, 1.6, palm * 3)
+  )
+
+  const speed = Math.abs(lm[0].x - lastX)
+  lastX = lm[0].x
+  if (speed > 0.03) {
+    for (let i = 0; i < COUNT; i++) {
+      vel[i * 3]     += (Math.random() - 0.5) * speed * 5
+      vel[i * 3 + 1] += (Math.random() - 0.5) * speed * 5
     }
   }
 
-  const open = lm[8].y<lm[6].y && lm[12].y<lm[10].y
-  const fist = lm[8].y>lm[6].y && lm[12].y>lm[10].y
-  const scissor = lm[8].y<lm[6].y && lm[12].y<lm[10].y && lm[16].y>lm[14].y
-  const index = lm[8].y<lm[6].y && lm[12].y>lm[10].y
+  const open =
+    lm[8].y < lm[6].y &&
+    lm[12].y < lm[10].y
+
+  const fist =
+    lm[8].y > lm[6].y &&
+    lm[12].y > lm[10].y
+
+  const scissor =
+    lm[8].y < lm[6].y &&
+    lm[12].y < lm[10].y &&
+    lm[16].y > lm[14].y
+
+  const index =
+    lm[8].y < lm[6].y &&
+    lm[12].y > lm[10].y
+
   const thumb =
-  lm[4].y < lm[3].y &&      // 拇指竖起
-  lm[8].y > lm[6].y &&      // 食指收起
-  lm[12].y > lm[10].y &&    // 中指收起
-  lm[16].y > lm[14].y &&    // 无名指收起
-  lm[20].y > lm[18].y       // 小指收起
+    lm[4].y < lm[3].y &&
+    lm[8].y > lm[6].y &&
+    lm[12].y > lm[10].y &&
+    lm[16].y > lm[14].y &&
+    lm[20].y > lm[18].y
 
   let g = -1
+  if (thumb) g = 4
+  else if (fist) g = 2
+  else if (scissor) g = 1
+  else if (index) g = 3
+  else if (open) g = 0
 
-if (thumb) g = 4
-else if (fist) g = 2
-else if (scissor) g = 1
-else if (index) g = 3
-else if (open) g = 0
+  // ===== 手势稳定判定 =====
+  if (g === stableGesture) {
+    stableCount++
+  } else {
+    stableGesture = g
+    stableCount = 1
+  }
 
-  if(g!==lastGesture){
+  if (stableCount === STABLE_FRAMES && g !== lastGesture && g !== -1) {
     explode()
-    if(g===0)shapeSphere()
-    if(g===1)shapeText()
-    if(g===2)shapeRing()
-    if(g===3)shapeStar()
-    if(g===4)shapeHeart()
-    lastGesture=g
+    if (g === 0) shapeSphere()
+    if (g === 1) shapeText()
+    if (g === 2) shapeRing()
+    if (g === 3) shapeStar()
+    if (g === 4) shapeHeart()
+    lastGesture = g
+    stableCount = 0
   }
 })
 
