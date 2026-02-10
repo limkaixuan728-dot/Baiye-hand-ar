@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8" />
-<title>OK → 我是白也（稳定版）</title>
+<title>OK → 我是白也（Final Stable）</title>
 <style>
 html,body{
   margin:0;
@@ -21,7 +21,7 @@ canvas{display:block}
 <script src="https://unpkg.com/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <script>
-/* ===================== Three ===================== */
+/* ===== Three ===== */
 const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100)
 camera.position.z = 4
@@ -31,89 +31,82 @@ renderer.setSize(innerWidth, innerHeight)
 renderer.setPixelRatio(devicePixelRatio)
 document.body.appendChild(renderer.domElement)
 
-/* ===================== 粒子 ===================== */
-const COUNT = 6000
+/* ===== 粒子 ===== */
+const COUNT = 5000
 const pos = new Float32Array(COUNT*3)
-const vel = new Float32Array(COUNT*3)
-const acc = new Float32Array(COUNT*3)
+const target = new Float32Array(COUNT*3)
 
 for(let i=0;i<COUNT;i++){
-  pos[i*3]=(Math.random()-0.5)*3
-  pos[i*3+1]=(Math.random()-0.5)*3
-  pos[i*3+2]=(Math.random()-0.5)*3
+  pos[i*3]   = (Math.random()-0.5)*3
+  pos[i*3+1] = (Math.random()-0.5)*3
+  pos[i*3+2] = 0
 
-  // 🔑 关键：初始 acc = 初始 pos（防止塌缩）
-  acc[i*3]   = pos[i*3]
-  acc[i*3+1] = pos[i*3+1]
-  acc[i*3+2] = pos[i*3+2]
+  target[i*3]   = pos[i*3]
+  target[i*3+1] = pos[i*3+1]
+  target[i*3+2] = 0
 }
 
 const geo = new THREE.BufferGeometry()
 geo.setAttribute('position', new THREE.BufferAttribute(pos,3))
 const mat = new THREE.PointsMaterial({
   color:0x00ffff,
-  size:0.02,
-  transparent:true,
-  opacity:0.9
+  size:0.02
 })
-const particles = new THREE.Points(geo, mat)
-scene.add(particles)
+const points = new THREE.Points(geo, mat)
+scene.add(points)
 
-/* ===================== 文字形态 ===================== */
+/* ===== 文字目标（所有粒子都有） ===== */
 function shapeText(){
   const c = document.createElement('canvas')
-  c.width = 512
-  c.height = 256
+  c.width = 600
+  c.height = 300
   const g = c.getContext('2d')
 
-  g.clearRect(0,0,512,256)
-  g.fillStyle = '#0ff'
+  g.clearRect(0,0,c.width,c.height)
+  g.fillStyle = '#fff'
   g.font = 'bold 96px sans-serif'
   g.textAlign = 'center'
   g.textBaseline = 'middle'
-  g.fillText('我是白也', 256, 128)
+  g.fillText('我是白也', c.width/2, c.height/2)
 
-  const data = g.getImageData(0,0,512,256).data
-  let pts = []
+  const img = g.getImageData(0,0,c.width,c.height).data
+  const pts = []
 
-  for(let y=0;y<256;y+=3){
-    for(let x=0;x<512;x+=3){
-      if(data[(y*512+x)*4+3] > 0){
+  for(let y=0;y<c.height;y+=3){
+    for(let x=0;x<c.width;x+=3){
+      if(img[(y*c.width+x)*4+3] > 0){
         pts.push({
-          x:(x/512-0.5)*3,
-          y:(0.5-y/256)*2
+          x:(x/c.width-0.5)*3,
+          y:(0.5-y/c.height)*2
         })
       }
     }
   }
 
   for(let i=0;i<COUNT;i++){
-    if(i < pts.length){
-      acc[i*3]   = pts[i].x
-      acc[i*3+1] = pts[i].y
-      acc[i*3+2] = 0
-    }
+    const p = pts[i % pts.length]   // ✅ 循环使用，永不缺 target
+    target[i*3]   = p.x
+    target[i*3+1] = p.y
+    target[i*3+2] = 0
   }
 }
 
-/* ===================== MediaPipe OK ===================== */
-let stable = 0
+/* ===== MediaPipe OK ===== */
+let okStable = 0
 let triggered = false
-const STABLE_FRAMES = 6
 
 const hands = new Hands({
   locateFile:f=>`https://unpkg.com/@mediapipe/hands/${f}`
 })
 hands.setOptions({
   maxNumHands:1,
-  modelComplexity:1,
   minDetectionConfidence:0.7,
   minTrackingConfidence:0.7
 })
 
 hands.onResults(res=>{
   if(!res.multiHandLandmarks){
-    stable = 0
+    okStable = 0
     triggered = false
     return
   }
@@ -126,14 +119,10 @@ hands.onResults(res=>{
     lm[16].y > lm[14].y &&
     lm[20].y > lm[18].y
 
-  if(ok){
-    stable++
-  }else{
-    stable = 0
-    triggered = false
-  }
+  if(ok) okStable++
+  else { okStable = 0; triggered = false }
 
-  if(stable > STABLE_FRAMES && !triggered){
+  if(okStable > 8 && !triggered){
     triggered = true
     shapeText()
   }
@@ -146,24 +135,13 @@ const cam = new Camera(document.getElementById('video'),{
 })
 cam.start()
 
-/* ===================== 动画 ===================== */
+/* ===== 动画（绝对安全） ===== */
 function animate(){
   requestAnimationFrame(animate)
-
   for(let i=0;i<COUNT;i++){
-    vel[i*3]   += (acc[i*3]   - pos[i*3])   * 0.04
-    vel[i*3+1] += (acc[i*3+1] - pos[i*3+1]) * 0.04
-    vel[i*3+2] += (acc[i*3+2] - pos[i*3+2]) * 0.04
-
-    vel[i*3]   *= 0.85
-    vel[i*3+1] *= 0.85
-    vel[i*3+2] *= 0.85
-
-    pos[i*3]   += vel[i*3]
-    pos[i*3+1] += vel[i*3+1]
-    pos[i*3+2] += vel[i*3+2]
+    pos[i*3]   += (target[i*3]   - pos[i*3])   * 0.06
+    pos[i*3+1] += (target[i*3+1] - pos[i*3+1]) * 0.06
   }
-
   geo.attributes.position.needsUpdate = true
   renderer.render(scene, camera)
 }
