@@ -178,27 +178,30 @@ hands.onResults(res => {
     lm[12].y > lm[10].y
 
   const scissor =
-    lm[8].y < lm[6].y &&
-    lm[12].y < lm[10].y &&
-    lm[16].y > lm[14].y
-
+  lm[8].y < lm[6].y &&          // 食指伸
+  lm[12].y < lm[10].y &&        // 中指伸
+  lm[16].y > lm[14].y &&        // 无名指收
+  lm[20].y > lm[18].y &&        // 小指收
+  lm[4].y > lm[3].y &&          // 拇指收（关键！）
+  Math.abs(lm[8].x - lm[12].x) > 0.06
+  
   const index =
     lm[8].y < lm[6].y &&
     lm[12].y > lm[10].y
 
   const thumb =
-    lm[4].y < lm[3].y &&
-    lm[8].y > lm[6].y &&
-    lm[12].y > lm[10].y &&
-    lm[16].y > lm[14].y &&
-    lm[20].y > lm[18].y
+  Math.abs(lm[4].x - lm[0].x) > 0.12 &&   // 拇指明显横向张开
+  lm[8].y > lm[6].y &&
+  lm[12].y > lm[10].y &&
+  lm[16].y > lm[14].y &&
+  lm[20].y > lm[18].y
 
   let g = -1
   if (thumb) g = 4
-  else if (fist) g = 2
-  else if (scissor) g = 1
-  else if (index) g = 3
-  else if (open) g = 0
+else if (scissor) g = 1
+else if (index) g = 3
+else if (fist) g = 2
+else if (open) g = 0
 
   // ===== 手势稳定判定 =====
   if (g === stableGesture) {
@@ -209,16 +212,31 @@ hands.onResults(res => {
   }
 
   if (stableCount === STABLE_FRAMES && g !== lastGesture && g !== -1) {
-    explode()
-    if (g === 0) shapeSphere()
-    if (g === 1) shapeText()
-    if (g === 2) shapeRing()
-    if (g === 3) shapeStar()
-    if (g === 4) shapeHeart()
-    lastGesture = g
-    stableCount = 0
+
+  // 1. 强刹车
+  for (let i = 0; i < COUNT; i++) {
+    vel[i*3]   *= 0.12
+    vel[i*3+1] *= 0.12
+    vel[i*3+2] *= 0.12
   }
-})
+
+  // 2. 轻爆炸
+  for (let i = 0; i < COUNT; i++) {
+    vel[i*3]   += (Math.random() - 0.5) * 0.6
+    vel[i*3+1] += (Math.random() - 0.5) * 0.6
+    vel[i*3+2] += (Math.random() - 0.5) * 0.6
+  }
+
+  // 3. 形态
+  if (g === 0) shapeSphere()
+  if (g === 1) shapeText()
+  if (g === 2) shapeRing()
+  if (g === 3) shapeStar()
+  if (g === 4) shapeHeart()
+
+  lastGesture = g
+  stableCount = 0
+}
 
 const cam = new Camera(document.getElementById('video'),{
   onFrame:async()=>{await hands.send({image:video})},
