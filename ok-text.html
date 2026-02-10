@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8" />
-<title>OK → 我是白也</title>
+<title>OK → 我是白也（稳定版）</title>
 <style>
 html,body{
   margin:0;
@@ -21,7 +21,7 @@ canvas{display:block}
 <script src="https://unpkg.com/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <script>
-/* ===================== Three 基础 ===================== */
+/* ===================== Three ===================== */
 const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100)
 camera.position.z = 4
@@ -31,8 +31,8 @@ renderer.setSize(innerWidth, innerHeight)
 renderer.setPixelRatio(devicePixelRatio)
 document.body.appendChild(renderer.domElement)
 
-/* ===================== 粒子系统 ===================== */
-const COUNT = 6000   // ⚠️ 刻意降到适合文字的数量
+/* ===================== 粒子 ===================== */
+const COUNT = 6000
 const pos = new Float32Array(COUNT*3)
 const vel = new Float32Array(COUNT*3)
 const acc = new Float32Array(COUNT*3)
@@ -41,6 +41,11 @@ for(let i=0;i<COUNT;i++){
   pos[i*3]=(Math.random()-0.5)*3
   pos[i*3+1]=(Math.random()-0.5)*3
   pos[i*3+2]=(Math.random()-0.5)*3
+
+  // 🔑 关键：初始 acc = 初始 pos（防止塌缩）
+  acc[i*3]   = pos[i*3]
+  acc[i*3+1] = pos[i*3+1]
+  acc[i*3+2] = pos[i*3+2]
 }
 
 const geo = new THREE.BufferGeometry()
@@ -69,12 +74,12 @@ function shapeText(){
   g.fillText('我是白也', 256, 128)
 
   const data = g.getImageData(0,0,512,256).data
-  let points = []
+  let pts = []
 
   for(let y=0;y<256;y+=3){
     for(let x=0;x<512;x+=3){
       if(data[(y*512+x)*4+3] > 0){
-        points.push({
+        pts.push({
           x:(x/512-0.5)*3,
           y:(0.5-y/256)*2
         })
@@ -83,21 +88,17 @@ function shapeText(){
   }
 
   for(let i=0;i<COUNT;i++){
-    if(i < points.length){
-      acc[i*3]   = points[i].x
-      acc[i*3+1] = points[i].y
-      acc[i*3+2] = 0
-    }else{
-      acc[i*3]   = 0
-      acc[i*3+1] = 0
+    if(i < pts.length){
+      acc[i*3]   = pts[i].x
+      acc[i*3+1] = pts[i].y
       acc[i*3+2] = 0
     }
   }
 }
 
-/* ===================== MediaPipe Hands ===================== */
-let stableCount = 0
-let okTriggered = false
+/* ===================== MediaPipe OK ===================== */
+let stable = 0
+let triggered = false
 const STABLE_FRAMES = 6
 
 const hands = new Hands({
@@ -111,15 +112,14 @@ hands.setOptions({
 })
 
 hands.onResults(res=>{
-  if(!res.multiHandLandmarks) {
-    stableCount = 0
-    okTriggered = false
+  if(!res.multiHandLandmarks){
+    stable = 0
+    triggered = false
     return
   }
 
   const lm = res.multiHandLandmarks[0]
 
-  // ✅ 超稳 OK 判断
   const ok =
     Math.hypot(lm[4].x-lm[8].x, lm[4].y-lm[8].y) < 0.05 &&
     lm[12].y > lm[10].y &&
@@ -127,14 +127,14 @@ hands.onResults(res=>{
     lm[20].y > lm[18].y
 
   if(ok){
-    stableCount++
+    stable++
   }else{
-    stableCount = 0
-    okTriggered = false
+    stable = 0
+    triggered = false
   }
 
-  if(stableCount > STABLE_FRAMES && !okTriggered){
-    okTriggered = true
+  if(stable > STABLE_FRAMES && !triggered){
+    triggered = true
     shapeText()
   }
 })
@@ -146,7 +146,7 @@ const cam = new Camera(document.getElementById('video'),{
 })
 cam.start()
 
-/* ===================== 物理更新 ===================== */
+/* ===================== 动画 ===================== */
 function animate(){
   requestAnimationFrame(animate)
 
