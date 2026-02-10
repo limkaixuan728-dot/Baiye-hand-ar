@@ -237,6 +237,7 @@ else if (open) g = 0
   lastGesture = g
   stableCount = 0
 }
+})
 
 const cam = new Camera(document.getElementById('video'),{
   onFrame:async()=>{await hands.send({image:video})},
