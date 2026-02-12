@@ -115,7 +115,7 @@
                 handData.z = THREE.MathUtils.lerp(handData.z, dist * 10, 0.1);
 
                 // 坐标转换 (修复镜像)
-                const curX = (lm[9].x - 0.5) * 35;
+                const curX = (0.5 - lm[9].x) * 35;
                 const curY = (0.5 - lm[9].y) * 20;
                 
                 // 挥手速度计算
