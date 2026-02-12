@@ -2,15 +2,16 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>白也的粒子宇宙 - 最终版</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>白也·粒子宇宙终极版</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; }
-        #info { position: absolute; top: 10px; left: 10px; z-index: 100; color: #0ff; font-family: sans-serif; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px; }
+        body { margin: 0; background: #000; overflow: hidden; }
+        #panel { position: absolute; top: 15px; left: 15px; z-index: 10; color: #0ff; font-family: "Microsoft YaHei", sans-serif; background: rgba(0,20,40,0.8); padding: 12px; border: 1px solid #0ff; border-radius: 8px; pointer-events: none; }
         video { display: none; }
     </style>
 </head>
 <body>
-    <div id="info">状态：等待手势...</div>
+    <div id="panel">初始化 AI 引擎...</div>
     <video id="input_video" playsinline autoplay muted></video>
 
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -18,49 +19,124 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
     <script>
-        const info = document.getElementById('info');
+        const panel = document.getElementById('panel');
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // --- 粒子系统升级 ---
-        const count = 15000;
-        const geometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(count * 3);
-        const randoms = new Float32Array(count); // 给每个粒子一个独特的性格
+        // --- 核心配置 ---
+        const P_COUNT = 18000; // 粒子数量
+        let currentState = 'SPHERE';
+        let handData = { x:0, y:0, z:1, vX:0, vY:0, active: false };
+        let lastHandPos = { x:0, y:0 };
 
-        for(let i = 0; i < count; i++) {
-            positions[i*3] = (Math.random() - 0.5) * 20;
-            positions[i*3+1] = (Math.random() - 0.5) * 20;
-            positions[i*3+2] = (Math.random() - 0.5) * 20;
-            randoms[i] = Math.random();
+        // --- 粒子系统构建 ---
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(P_COUNT * 3);
+        const targets = new Float32Array(P_COUNT * 3); // 目标形状
+        const vels = new Float32Array(P_COUNT * 3); // 粒子当前速度
+        
+        for(let i=0; i<P_COUNT*3; i++) {
+            positions[i] = (Math.random()-0.5)*50;
+            vels[i] = 0;
         }
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        const material = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.06, transparent: true, blending: THREE.AdditiveBlending });
-        const points = new THREE.Points(geometry, material);
-        scene.add(points);
+        const material = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.05, transparent: true, blending: THREE.AdditiveBlending });
+        const particles = new THREE.Points(geometry, material);
+        scene.add(particles);
         camera.position.z = 15;
 
-        let handX = 0, handY = 0, handActive = false;
+        // --- 文字坐标采集 (Canvas) ---
+        const textCoords = [];
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 200; canvas.height = 100;
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 24px Arial';
+        ctx.fillText('我是白也', 10, 50);
+        const imgData = ctx.getImageData(0,0,200,100).data;
+        for(let y=0; y<100; y+=1) {
+            for(let x=0; x<200; x+=1) {
+                if(imgData[(y*200+x)*4] > 128) textCoords.push({x:(x-100)/10, y:(50-y)/10});
+            }
+        }
 
-        const hands = new Hands({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-        });
+        // --- 形状计算逻辑 ---
+        function setTargetShape(shape) {
+            if(currentState === shape) return;
+            currentState = shape;
+            // 切换瞬间触发“爆炸”特效速度
+            for(let i=0; i<P_COUNT*3; i++) vels[i] += (Math.random()-0.5) * 2; 
 
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1 });
-        hands.onResults((res) => {
-            if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
-                handActive = true;
-                const lm = res.multiHandLandmarks[0][9];
-                // 【修复左右反转】这里从 (0.5 - lm.x) 改成了 (lm.x - 0.5)
-                handX = (lm.x - 0.5) * 30; 
-                handY = (0.5 - lm.y) * 20;
-                info.innerText = "已识别：手掌模式";
+            for(let i=0; i<P_COUNT; i++) {
+                let idx = i * 3;
+                if(shape === 'SPHERE') {
+                    const phi = Math.acos(-1 + (2 * i) / P_COUNT);
+                    const theta = Math.sqrt(P_COUNT * Math.PI) * phi;
+                    targets[idx] = 4 * Math.sin(phi) * Math.cos(theta);
+                    targets[idx+1] = 4 * Math.sin(phi) * Math.sin(theta);
+                    targets[idx+2] = 4 * Math.cos(phi);
+                } else if(shape === 'TORUS') { // 圆环
+                    const u = Math.random() * Math.PI * 2;
+                    const v = Math.random() * Math.PI * 2;
+                    targets[idx] = (4 + 1.5 * Math.cos(v)) * Math.cos(u);
+                    targets[idx+1] = (4 + 1.5 * Math.cos(v)) * Math.sin(u);
+                    targets[idx+2] = 1.5 * Math.sin(v);
+                } else if(shape === 'HEART') { // 爱心
+                    const t = Math.random() * Math.PI * 2;
+                    targets[idx] = 0.3 * (16 * Math.pow(Math.sin(t), 3));
+                    targets[idx+1] = 0.3 * (13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t));
+                    targets[idx+2] = (Math.random()-0.5) * 2;
+                } else if(shape === 'TEXT') { // 文字
+                    const p = textCoords[i % textCoords.length];
+                    targets[idx] = p.x * 1.5; targets[idx+1] = p.y * 1.5; targets[idx+2] = (Math.random()-0.5);
+                } else if(shape === 'STAR') { // 星形
+                    const t = Math.random() * Math.PI * 2;
+                    const r = 3 + 2 * Math.sin(5 * t);
+                    targets[idx] = r * Math.cos(t); targets[idx+1] = r * Math.sin(t); targets[idx+2] = (Math.random()-0.5);
+                }
+            }
+        }
+
+        // --- MediaPipe 手势识别 ---
+        const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6 });
+        hands.onResults(res => {
+            if(res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+                handData.active = true;
+                const lm = res.multiHandLandmarks[0];
+                const wrist = lm[0];
+                const middle = lm[9];
+                
+                // 深度反馈计算 (手掌在画面中的距离)
+                const dist = Math.sqrt(Math.pow(lm[0].x - lm[9].x, 2) + Math.pow(lm[0].y - lm[9].y, 2));
+                handData.z = THREE.MathUtils.lerp(handData.z, dist * 10, 0.1);
+
+                // 坐标转换 (修复镜像)
+                const curX = (lm[9].x - 0.5) * 35;
+                const curY = (0.5 - lm[9].y) * 20;
+                
+                // 挥手速度计算
+                handData.vX = curX - lastHandPos.x;
+                handData.vY = curY - lastHandPos.y;
+                lastHandPos = { x: curX, y: curY };
+                handData.x = curX; handData.y = curY;
+
+                // 手势判断逻辑
+                const isFingerUp = (tip, base) => lm[tip].y < lm[base].y;
+                const upCount = [8,12,16,20].filter(i => isFingerUp(i, i-2)).length;
+                const thumbUp = lm[4].y < lm[3].y && lm[4].x < lm[3].x; // 粗略判断大拇指
+
+                if(upCount >= 4) { setTargetShape('SPHERE'); panel.innerText = "🖐️ 张手变球"; }
+                else if(upCount === 2) { setTargetShape('TEXT'); panel.innerText = "✌️ 剪刀手：我是白也"; }
+                else if(upCount === 0) { setTargetShape('TORUS'); panel.innerText = "✊ 握拳变圆环"; }
+                else if(upCount === 1) { setTargetShape('STAR'); panel.innerText = "☝️ 食指变星"; }
+                else if(thumbUp) { setTargetShape('HEART'); panel.innerText = "👍 竖大拇指变爱心"; }
             } else {
-                handActive = false;
-                info.innerText = "等待手势...";
+                handData.active = false;
+                panel.innerText = "等待手势入场...";
             }
         });
 
@@ -70,30 +146,45 @@
         });
         cam.start();
 
+        // --- 物理渲染循环 ---
         function animate() {
             requestAnimationFrame(animate);
-            const pos = points.geometry.attributes.position.array;
-            
-            for(let i = 0; i < count; i++) {
-                if(handActive) {
-                    // 让粒子不再挤成一个点，而是形成一个有半径的球体 (Radius = 2)
-                    const angle = randoms[i] * Math.PI * 2;
-                    const shift = Math.sin(Date.now() * 0.002 + i) * 1.5;
-                    
-                    const targetX = handX + Math.cos(angle) * (2 + shift);
-                    const targetY = handY + Math.sin(angle) * (2 + shift);
-                    
-                    pos[i*3] += (targetX - pos[i*3]) * 0.1;
-                    pos[i*3+1] += (targetY - pos[i*3+1]) * 0.1;
-                    pos[i*3+2] += (0 - pos[i*3+2]) * 0.1;
-                } else {
-                    // 无手时的怠速旋转
-                    pos[i*3] += Math.sin(Date.now() * 0.001 + i) * 0.02;
-                    pos[i*3+1] += Math.cos(Date.now() * 0.001 + i) * 0.02;
+            const pos = particles.geometry.attributes.position.array;
+            const speed = Math.sqrt(handData.vX**2 + handData.vY**2);
+
+            for(let i=0; i<P_COUNT; i++) {
+                let idx = i * 3;
+                // 1. 基础引力：向目标形状移动
+                vels[idx] += (targets[idx] - pos[idx]) * 0.01;
+                vels[idx+1] += (targets[idx+1] - pos[idx+1]) * 0.01;
+                vels[idx+2] += (targets[idx+2] - pos[idx+2]) * 0.01;
+
+                // 2. 挥手风暴：快速挥动时物理吹散效果
+                if(handData.active && speed > 0.5) {
+                    const dx = pos[idx] - handData.x;
+                    const dy = pos[idx+1] - handData.y;
+                    const d = Math.sqrt(dx*dx + dy*dy);
+                    if(d < 5) {
+                        vels[idx] += handData.vX * 0.5;
+                        vels[idx+1] += handData.vY * 0.5;
+                    }
                 }
+
+                // 3. 物理摩擦力 (防止无休止抖动)
+                vels[idx] *= 0.92; vels[idx+1] *= 0.92; vels[idx+2] *= 0.92;
+
+                // 4. 更新坐标并应用深度缩放
+                pos[idx] += vels[idx];
+                pos[idx+1] += vels[idx+1];
+                pos[idx+2] += vels[idx+2];
             }
-            points.geometry.attributes.position.needsUpdate = true;
-            points.rotation.y += 0.001;
+
+            // 深度推拉：整体缩放粒子系统
+            particles.scale.setScalar(0.5 + handData.z);
+            particles.position.set(handData.x, handData.y, 0);
+            particles.rotation.y += 0.005;
+            
+            particles.geometry.attributes.position.needsUpdate = true;
             renderer.render(scene, camera);
         }
         animate();
