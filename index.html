@@ -2,16 +2,15 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>白也的 WebAR 粒子世界</title>
+    <title>白也的粒子宇宙 - 最终版</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; }
-        #status-panel { position: absolute; top: 10px; left: 10px; z-index: 100; color: #0ff; font-family: monospace; background: rgba(0,0,0,0.7); padding: 8px; border: 1px solid #0ff; pointer-events: none; font-size: 12px; }
+        #info { position: absolute; top: 10px; left: 10px; z-index: 100; color: #0ff; font-family: sans-serif; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px; }
         video { display: none; }
     </style>
 </head>
 <body>
-    <div id="status-panel">AI 启动中...</div>
+    <div id="info">状态：等待手势...</div>
     <video id="input_video" playsinline autoplay muted></video>
 
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -19,102 +18,85 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
     <script>
-        const statusPanel = document.getElementById('status-panel');
+        const info = document.getElementById('info');
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // 粒子系统设置
-        const PARTICLE_COUNT = 15000;
-        const positions = new Float32Array(PARTICLE_COUNT * 3);
-        const velocities = new Float32Array(PARTICLE_COUNT * 3);
+        // --- 粒子系统升级 ---
+        const count = 15000;
         const geometry = new THREE.BufferGeometry();
-        
-        for(let i=0; i<PARTICLE_COUNT * 3; i++) {
-            positions[i] = (Math.random() - 0.5) * 20;
-            velocities[i] = 0;
-        }
-        
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        const material = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.05, transparent: true, blending: THREE.AdditiveBlending });
-        const particles = new THREE.Points(geometry, material);
-        scene.add(particles);
-        camera.position.z = 12;
+        const positions = new Float32Array(count * 3);
+        const randoms = new Float32Array(count); // 给每个粒子一个独特的性格
 
-        // 手势逻辑变量
-        let targetX = 0, targetY = 0, targetZ = 0;
-        let isHandVisible = false;
-        let currentGesture = 'none';
+        for(let i = 0; i < count; i++) {
+            positions[i*3] = (Math.random() - 0.5) * 20;
+            positions[i*3+1] = (Math.random() - 0.5) * 20;
+            positions[i*3+2] = (Math.random() - 0.5) * 20;
+            randoms[i] = Math.random();
+        }
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const material = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.06, transparent: true, blending: THREE.AdditiveBlending });
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+        camera.position.z = 15;
+
+        let handX = 0, handY = 0, handActive = false;
 
         const hands = new Hands({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
         });
 
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-
-        hands.onResults((results) => {
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                isHandVisible = true;
-                const lm = results.multiHandLandmarks[0];
-                // 坐标转换
-                targetX = (0.5 - lm[9].x) * 25; 
-                targetY = (0.5 - lm[9].y) * 15;
-                
-                // 简单的手势判断
-                const isIndexUp = lm[8].y < lm[6].y;
-                const isMiddleUp = lm[12].y < lm[10].y;
-                if(isIndexUp && isMiddleUp) currentGesture = 'victory';
-                else currentGesture = 'palm';
-                
-                statusPanel.innerText = `已连接！手势: ${currentGesture === 'victory' ? '✌️ (文字模式)' : '✋ (粒子球模式)'}`;
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1 });
+        hands.onResults((res) => {
+            if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+                handActive = true;
+                const lm = res.multiHandLandmarks[0][9];
+                // 【修复左右反转】这里从 (0.5 - lm.x) 改成了 (lm.x - 0.5)
+                handX = (lm.x - 0.5) * 30; 
+                handY = (0.5 - lm.y) * 20;
+                info.innerText = "已识别：手掌模式";
             } else {
-                isHandVisible = false;
-                statusPanel.innerText = "等待手势入场...";
+                handActive = false;
+                info.innerText = "等待手势...";
             }
         });
 
-        const cameraHelper = new Camera(document.getElementById('input_video'), {
+        const cam = new Camera(document.getElementById('input_video'), {
             onFrame: async () => { await hands.send({image: document.getElementById('input_video')}); },
             width: 640, height: 480
         });
-        cameraHelper.start();
+        cam.start();
 
-        // 动画循环：物理模拟
         function animate() {
             requestAnimationFrame(animate);
-            const posAttr = particles.geometry.attributes.position;
+            const pos = points.geometry.attributes.position.array;
             
-            for (let i = 0; i < PARTICLE_COUNT; i++) {
-                let ix = i * 3, iy = i * 3 + 1, iz = i * 3 + 2;
-                
-                if (isHandVisible) {
-                    // 粒子向手心聚拢
-                    let dx = targetX - posAttr.array[ix];
-                    let dy = targetY - posAttr.array[iy];
-                    let dz = targetZ - posAttr.array[iz];
+            for(let i = 0; i < count; i++) {
+                if(handActive) {
+                    // 让粒子不再挤成一个点，而是形成一个有半径的球体 (Radius = 2)
+                    const angle = randoms[i] * Math.PI * 2;
+                    const shift = Math.sin(Date.now() * 0.002 + i) * 1.5;
                     
-                    posAttr.array[ix] += dx * 0.05 + (Math.random()-0.5)*0.1;
-                    posAttr.array[iy] += dy * 0.05 + (Math.random()-0.5)*0.1;
-                    posAttr.array[iz] += dz * 0.05 + (Math.random()-0.5)*0.1;
+                    const targetX = handX + Math.cos(angle) * (2 + shift);
+                    const targetY = handY + Math.sin(angle) * (2 + shift);
+                    
+                    pos[i*3] += (targetX - pos[i*3]) * 0.1;
+                    pos[i*3+1] += (targetY - pos[i*3+1]) * 0.1;
+                    pos[i*3+2] += (0 - pos[i*3+2]) * 0.1;
                 } else {
-                    // 无手时随机飘动
-                    posAttr.array[ix] += Math.sin(Date.now() * 0.001 + i) * 0.01;
-                    posAttr.array[iy] += Math.cos(Date.now() * 0.001 + i) * 0.01;
+                    // 无手时的怠速旋转
+                    pos[i*3] += Math.sin(Date.now() * 0.001 + i) * 0.02;
+                    pos[i*3+1] += Math.cos(Date.now() * 0.001 + i) * 0.02;
                 }
             }
-            posAttr.needsUpdate = true;
-            particles.rotation.y += 0.002;
+            points.geometry.attributes.position.needsUpdate = true;
+            points.rotation.y += 0.001;
             renderer.render(scene, camera);
         }
         animate();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
