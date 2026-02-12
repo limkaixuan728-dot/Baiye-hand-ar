@@ -2,16 +2,16 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>白也的 WebAR 粒子 - 调试版</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>白也的 WebAR 粒子世界</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; color: #0f0; font-family: monospace; }
-        #debug-log { position: absolute; top: 10px; left: 10px; z-index: 100; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #0f0; pointer-events: none; line-height: 1.5; }
+        body { margin: 0; overflow: hidden; background: #000; }
+        #status-panel { position: absolute; top: 10px; left: 10px; z-index: 100; color: #0ff; font-family: monospace; background: rgba(0,0,0,0.7); padding: 8px; border: 1px solid #0ff; pointer-events: none; font-size: 12px; }
         video { display: none; }
-        canvas { display: block; }
     </style>
 </head>
 <body>
-    <div id="debug-log">系统日志：准备启动...</div>
+    <div id="status-panel">AI 启动中...</div>
     <video id="input_video" playsinline autoplay muted></video>
 
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -19,61 +19,96 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
     <script>
-        const logEl = document.getElementById('debug-log');
-        function log(msg) { logEl.innerHTML += `<br>> ${msg}`; console.log(msg); }
-
-        log("1. 渲染引擎启动...");
+        const statusPanel = document.getElementById('status-panel');
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // 创建一个初始球体，证明画面没死
-        const geometry = new THREE.SphereGeometry(5, 32, 32);
-        const material = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.1 });
-        const sphere = new THREE.Points(geometry, material);
-        scene.add(sphere);
-        camera.position.z = 15;
-
-        function animate() {
-            requestAnimationFrame(animate);
-            sphere.rotation.y += 0.01;
-            renderer.render(scene, camera);
+        // 粒子系统设置
+        const PARTICLE_COUNT = 15000;
+        const positions = new Float32Array(PARTICLE_COUNT * 3);
+        const velocities = new Float32Array(PARTICLE_COUNT * 3);
+        const geometry = new THREE.BufferGeometry();
+        
+        for(let i=0; i<PARTICLE_COUNT * 3; i++) {
+            positions[i] = (Math.random() - 0.5) * 20;
+            velocities[i] = 0;
         }
-        animate();
-        log("2. 基础画面已就绪 (你应该能看到旋转的光球)");
+        
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const material = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.05, transparent: true, blending: THREE.AdditiveBlending });
+        const particles = new THREE.Points(geometry, material);
+        scene.add(particles);
+        camera.position.z = 12;
 
-        log("3. 加载 AI 模型 (MediaPipe)...");
+        // 手势逻辑变量
+        let targetX = 0, targetY = 0, targetZ = 0;
+        let isHandVisible = false;
+        let currentGesture = 'none';
+
         const hands = new Hands({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
         });
 
-        hands.setOptions({
-            maxNumHands: 1,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 
         hands.onResults((results) => {
-            if (results.multiHandLandmarks.length > 0) {
-                sphere.material.color.setHex(0xff0000); // 识别到手会变红
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                isHandVisible = true;
+                const lm = results.multiHandLandmarks[0];
+                // 坐标转换
+                targetX = (0.5 - lm[9].x) * 25; 
+                targetY = (0.5 - lm[9].y) * 15;
+                
+                // 简单的手势判断
+                const isIndexUp = lm[8].y < lm[6].y;
+                const isMiddleUp = lm[12].y < lm[10].y;
+                if(isIndexUp && isMiddleUp) currentGesture = 'victory';
+                else currentGesture = 'palm';
+                
+                statusPanel.innerText = `已连接！手势: ${currentGesture === 'victory' ? '✌️ (文字模式)' : '✋ (粒子球模式)'}`;
             } else {
-                sphere.material.color.setHex(0x00ffff);
+                isHandVisible = false;
+                statusPanel.innerText = "等待手势入场...";
             }
         });
 
-        const videoElement = document.getElementById('input_video');
-        const cameraHelper = new Camera(videoElement, {
-            onFrame: async () => { await hands.send({image: videoElement}); },
+        const cameraHelper = new Camera(document.getElementById('input_video'), {
+            onFrame: async () => { await hands.send({image: document.getElementById('input_video')}); },
             width: 640, height: 480
         });
+        cameraHelper.start();
 
-        log("4. 正在申请相机权限...");
-        cameraHelper.start()
-            .then(() => log("5. 相机启动成功！请在镜头前展示手掌"))
-            .catch(err => log("相机错误: " + err));
+        // 动画循环：物理模拟
+        function animate() {
+            requestAnimationFrame(animate);
+            const posAttr = particles.geometry.attributes.position;
+            
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                let ix = i * 3, iy = i * 3 + 1, iz = i * 3 + 2;
+                
+                if (isHandVisible) {
+                    // 粒子向手心聚拢
+                    let dx = targetX - posAttr.array[ix];
+                    let dy = targetY - posAttr.array[iy];
+                    let dz = targetZ - posAttr.array[iz];
+                    
+                    posAttr.array[ix] += dx * 0.05 + (Math.random()-0.5)*0.1;
+                    posAttr.array[iy] += dy * 0.05 + (Math.random()-0.5)*0.1;
+                    posAttr.array[iz] += dz * 0.05 + (Math.random()-0.5)*0.1;
+                } else {
+                    // 无手时随机飘动
+                    posAttr.array[ix] += Math.sin(Date.now() * 0.001 + i) * 0.01;
+                    posAttr.array[iy] += Math.cos(Date.now() * 0.001 + i) * 0.01;
+                }
+            }
+            posAttr.needsUpdate = true;
+            particles.rotation.y += 0.002;
+            renderer.render(scene, camera);
+        }
+        animate();
 
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
